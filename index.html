@@ -25,6 +25,7 @@
             font-size: 2.5rem;
             margin-bottom: 20px;
             color: #2c3e50;
+            text-align: center;
         }
         .section {
             background-color: #fff;
@@ -93,7 +94,7 @@
         }
         #website-preview {
             width: 100%;
-            height: 500px;
+            height: 900px;
             border: 1px solid #ddd;
             border-radius: 4px;
         }
@@ -111,6 +112,13 @@
         .active, .collapsible:hover {
             background-color: #2980b9;
         }
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 10px;
+            font-style: italic;
+            color: #666;
+        }
         @media (max-width: 768px) {
             .container {
                 padding: 10px;
@@ -124,8 +132,8 @@
         
         <div class="section">
             <h2>설정</h2>
-            <input id="company-name" type="text" placeholder="회사명">
-            <input id="industry" type="text" placeholder="업종">
+            <input id="company-name" type="text" placeholder="회사명" required>
+            <input id="industry" type="text" placeholder="업종" required>
             <input id="primary-color" type="color" value="#3498db">
             <button id="start-chat">대화 시작하기</button>
         </div>
@@ -133,17 +141,19 @@
         <div class="section">
             <h2>대화</h2>
             <div id="chat-messages"></div>
+            <div id="chat-loading" class="loading">AI가 응답을 생성 중입니다...</div>
             <input id="user-input" type="text" placeholder="메시지를 입력하세요...">
             <button id="send-message">전송</button>
         </div>
         
         <div class="section">
-            <button class="collapsible">생성된 웹사이트 코드</button>
+            <button class="collapsible" id="toggle-code">생성된 웹사이트 코드</button>
             <pre id="generated-code"></pre>
         </div>
         
         <div class="section">
             <h2>웹사이트 미리보기</h2>
+            <div id="preview-loading" class="loading">웹사이트를 생성 중입니다...</div>
             <iframe id="website-preview"></iframe>
         </div>
     </div>
@@ -152,34 +162,36 @@
     const FIREBASE_FUNCTION_URL = 'https://us-central1-llamaaitest.cloudfunctions.net/groqApi';
     let sessionId = localStorage.getItem('sessionId') || Date.now().toString(36) + Math.random().toString(36).substr(2);
     let conversationHistory = JSON.parse(localStorage.getItem('conversationHistory') || '[]');
+    let websiteCode = localStorage.getItem('websiteCode') || '';
 
-    // 페이지 로드 시 세션 ID를 로컬 스토리지에 저장
+    const elements = {
+        companyName: document.getElementById('company-name'),
+        industry: document.getElementById('industry'),
+        primaryColor: document.getElementById('primary-color'),
+        startChat: document.getElementById('start-chat'),
+        chatMessages: document.getElementById('chat-messages'),
+        userInput: document.getElementById('user-input'),
+        sendMessage: document.getElementById('send-message'),
+        toggleCode: document.getElementById('toggle-code'),
+        generatedCode: document.getElementById('generated-code'),
+        websitePreview: document.getElementById('website-preview'),
+        chatLoading: document.getElementById('chat-loading'),
+        previewLoading: document.getElementById('preview-loading')
+    };
+
     localStorage.setItem('sessionId', sessionId);
 
-    document.getElementById('start-chat').addEventListener('click', startChat);
-    document.getElementById('send-message').addEventListener('click', sendMessage);
-    document.getElementById('user-input').addEventListener('keypress', function(e) {
+    elements.startChat.addEventListener('click', startChat);
+    elements.sendMessage.addEventListener('click', sendMessage);
+    elements.userInput.addEventListener('keypress', function(e) {
         if (e.key === 'Enter') sendMessage();
     });
-
-    // 코드 접기/펼치기 기능 추가
-    var coll = document.getElementsByClassName("collapsible");
-    for (var i = 0; i < coll.length; i++) {
-        coll[i].addEventListener("click", function() {
-            this.classList.toggle("active");
-            var content = this.nextElementSibling;
-            if (content.style.display === "block") {
-                content.style.display = "none";
-            } else {
-                content.style.display = "block";
-            }
-        });
-    }
+    elements.toggleCode.addEventListener('click', toggleCode);
 
     function startChat() {
-        const companyName = document.getElementById('company-name').value;
-        const industry = document.getElementById('industry').value;
-        const primaryColor = document.getElementById('primary-color').value;
+        const companyName = elements.companyName.value.trim();
+        const industry = elements.industry.value.trim();
+        const primaryColor = elements.primaryColor.value;
 
         if (!companyName || !industry) {
             alert('회사명과 업종을 입력해주세요.');
@@ -195,17 +207,23 @@
         }];
         localStorage.setItem('conversationHistory', JSON.stringify(conversationHistory));
 
+        websiteCode = '';
+        localStorage.setItem('websiteCode', '');
+
         updateChatMessages();
+        elements.generatedCode.textContent = '';
+        elements.websitePreview.srcdoc = '';
     }
 
     async function sendMessage() {
-        const userInput = document.getElementById('user-input');
-        const message = userInput.value.trim();
+        const message = elements.userInput.value.trim();
         if (!message) return;
 
         conversationHistory.push({ role: "user", content: message });
         updateChatMessages();
-        userInput.value = '';
+        elements.userInput.value = '';
+
+        elements.chatLoading.style.display = 'block';
 
         try {
             const response = await fetch(`${FIREBASE_FUNCTION_URL}/getGroqResponse`, {
@@ -224,6 +242,9 @@
             }
 
             const data = await response.json();
+            if (data.error) {
+                throw new Error(data.error);
+            }
             conversationHistory.push({ role: "assistant", content: data.message });
             localStorage.setItem('conversationHistory', JSON.stringify(conversationHistory));
             updateChatMessages();
@@ -232,33 +253,35 @@
 
         } catch (error) {
             console.error('Error:', error);
-            conversationHistory.push({ role: "assistant", content: '오류가 발생했습니다. 다시 시도해 주세요.' });
+            conversationHistory.push({ role: "assistant", content: `오류가 발생했습니다: ${error.message}` });
             updateChatMessages();
+        } finally {
+            elements.chatLoading.style.display = 'none';
         }
     }
 
     function updateChatMessages() {
-        const chatMessages = document.getElementById('chat-messages');
-        chatMessages.innerHTML = conversationHistory.map(msg => 
+        elements.chatMessages.innerHTML = conversationHistory.map(msg => 
             `<div class="message ${msg.role === 'user' ? 'user-message' : 'ai-message'}">
                 ${formatMessage(msg.content)}
             </div>`
         ).join('');
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+        elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
     }
 
     function formatMessage(content) {
-        // 메시지 내용을 HTML로 포맷팅
         return content.replace(/\n/g, '<br>')
                       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                       .replace(/\*(.*?)\*/g, '<em>$1</em>')
-                      .replace(/`(.*?)`/g, '<code>$1</code>');
+                      .replace(/`(.*?)`/g, '<code style="background-color: #f0f0f0; padding: 2px 4px; border-radius: 4px;">$1</code>');
     }
 
     async function generateWebsiteCode() {
-        const companyName = document.getElementById('company-name').value;
-        const industry = document.getElementById('industry').value;
-        const primaryColor = document.getElementById('primary-color').value;
+        const companyName = elements.companyName.value;
+        const industry = elements.industry.value;
+        const primaryColor = elements.primaryColor.value;
+
+        elements.previewLoading.style.display = 'block';
 
         try {
             const response = await fetch(`${FIREBASE_FUNCTION_URL}/generateWebsite`, {
@@ -271,31 +294,53 @@
                     companyName: companyName,
                     industry: industry,
                     primaryColor: primaryColor,
-                    conversationHistory: conversationHistory
+                    conversationHistory: conversationHistory,
+                    websiteCode: websiteCode
                 }),
             });
 
             if (!response.ok) {
-                throw new Error('웹사이트 코드 생성 실패');
+                const errorData = await response.json();
+                throw new Error(errorData.error || '웹사이트 코드 생성 실패');
             }
 
             const data = await response.json();
-            const generatedCode = data.websiteCode;
+            if (data.error) {
+                throw new Error(data.error);
+            }
             
-            document.getElementById('generated-code').textContent = generatedCode;
+            websiteCode = data.websiteCode;
+            localStorage.setItem('websiteCode', websiteCode);
+            
+            elements.generatedCode.textContent = websiteCode;
         
-            const previewFrame = document.getElementById('website-preview');
-            previewFrame.srcdoc = generatedCode;
+            elements.websitePreview.srcdoc = websiteCode;
 
         } catch (error) {
-            const errorMessage = error.response ? error.response.data.details : error.message;
-            document.getElementById('generated-code').textContent = `웹사이트 코드를 생성할 수 없습니다. 오류 내용: ${errorMessage}`;
-            document.getElementById('website-preview').srcdoc = `<html><body><h1>오류 발생</h1><p>${error.message}</p></body></html>`;
+            console.error('Error generating website code:', error);
+            elements.generatedCode.textContent = `웹사이트 코드를 생성할 수 없습니다. 오류 내용: ${error.message}`;
+            elements.websitePreview.srcdoc = `<html><body><h1>오류 발생</h1><p>${error.message}</p></body></html>`;
+        } finally {
+            elements.previewLoading.style.display = 'none';
         }
     }
 
-    // 페이지 로드 시 대화 내용 복원
+    function toggleCode() {
+        if (elements.generatedCode.style.display === "none" || elements.generatedCode.style.display === "") {
+            elements.generatedCode.style.display = "block";
+            elements.toggleCode.textContent = "생성된 웹사이트 코드 숨기기";
+        } else {
+            elements.generatedCode.style.display = "none";
+            elements.toggleCode.textContent = "생성된 웹사이트 코드 보기";
+        }
+    }
+
+    // 페이지 로드 시 대화 내용과 웹사이트 코드 복원
     updateChatMessages();
+    if (websiteCode) {
+        elements.generatedCode.textContent = websiteCode;
+        elements.websitePreview.srcdoc = websiteCode;
+    }
     </script>
 </body>
 </html>
