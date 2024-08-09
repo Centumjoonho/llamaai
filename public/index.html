@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 웹사이트 생성기</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f4f4f4;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 20px;
+            color: #2c3e50;
+        }
+        .section {
+            background-color: #fff;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .section h2 {
+            font-size: 1.5rem;
+            margin-bottom: 15px;
+            color: #2c3e50;
+        }
+        input[type="text"], input[type="color"] {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 1rem;
+        }
+        button {
+            background-color: #3498db;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        #chat-messages {
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        .message {
+            margin-bottom: 10px;
+            padding: 10px;
+            border-radius: 4px;
+            max-width: 80%;
+            word-wrap: break-word;
+        }
+        .user-message {
+            background-color: #e8f5fe;
+            margin-left: auto;
+        }
+        .ai-message {
+            background-color: #f0f0f0;
+        }
+        #generated-code {
+            background-color: #f8f8f8;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            overflow-x: auto;
+            display: none;
+        }
+        #website-preview {
+            width: 100%;
+            height: 500px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .collapsible {
+            background-color: #3498db;
+            color: white;
+            cursor: pointer;
+            padding: 18px;
+            width: 100%;
+            border: none;
+            text-align: left;
+            outline: none;
+            font-size: 15px;
+        }
+        .active, .collapsible:hover {
+            background-color: #2980b9;
+        }
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AI 웹사이트 생성기</h1>
+        
+        <div class="section">
+            <h2>설정</h2>
+            <input id="company-name" type="text" placeholder="회사명">
+            <input id="industry" type="text" placeholder="업종">
+            <input id="primary-color" type="color" value="#3498db">
+            <button id="start-chat">대화 시작하기</button>
+        </div>
+        
+        <div class="section">
+            <h2>대화</h2>
+            <div id="chat-messages"></div>
+            <input id="user-input" type="text" placeholder="메시지를 입력하세요...">
+            <button id="send-message">전송</button>
+        </div>
+        
+        <div class="section">
+            <button class="collapsible">생성된 웹사이트 코드</button>
+            <pre id="generated-code"></pre>
+        </div>
+        
+        <div class="section">
+            <h2>웹사이트 미리보기</h2>
+            <iframe id="website-preview"></iframe>
+        </div>
+    </div>
+
+    <script>
+    const FIREBASE_FUNCTION_URL = 'https://us-central1-llamaaitest.cloudfunctions.net/groqApi';
+    let sessionId = localStorage.getItem('sessionId') || Date.now().toString(36) + Math.random().toString(36).substr(2);
+    let conversationHistory = JSON.parse(localStorage.getItem('conversationHistory') || '[]');
+
+    // 페이지 로드 시 세션 ID를 로컬 스토리지에 저장
+    localStorage.setItem('sessionId', sessionId);
+
+    document.getElementById('start-chat').addEventListener('click', startChat);
+    document.getElementById('send-message').addEventListener('click', sendMessage);
+    document.getElementById('user-input').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') sendMessage();
+    });
+
+    // 코드 접기/펼치기 기능 추가
+    var coll = document.getElementsByClassName("collapsible");
+    for (var i = 0; i < coll.length; i++) {
+        coll[i].addEventListener("click", function() {
+            this.classList.toggle("active");
+            var content = this.nextElementSibling;
+            if (content.style.display === "block") {
+                content.style.display = "none";
+            } else {
+                content.style.display = "block";
+            }
+        });
+    }
+
+    function startChat() {
+        const companyName = document.getElementById('company-name').value;
+        const industry = document.getElementById('industry').value;
+        const primaryColor = document.getElementById('primary-color').value;
+
+        if (!companyName || !industry) {
+            alert('회사명과 업종을 입력해주세요.');
+            return;
+        }
+
+        sessionId = Date.now().toString(36) + Math.random().toString(36).substr(2);
+        localStorage.setItem('sessionId', sessionId);
+
+        conversationHistory = [{
+            role: "system",
+            content: `새로운 대화가 ${industry} 산업의 ${companyName}에 대해 시작되었습니다. 주 색상: ${primaryColor}`
+        }];
+        localStorage.setItem('conversationHistory', JSON.stringify(conversationHistory));
+
+        updateChatMessages();
+    }
+
+    async function sendMessage() {
+        const userInput = document.getElementById('user-input');
+        const message = userInput.value.trim();
+        if (!message) return;
+
+        conversationHistory.push({ role: "user", content: message });
+        updateChatMessages();
+        userInput.value = '';
+
+        try {
+            const response = await fetch(`${FIREBASE_FUNCTION_URL}/getGroqResponse`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    message: message,
+                    sessionId: sessionId
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error('API 요청 실패');
+            }
+
+            const data = await response.json();
+            conversationHistory.push({ role: "assistant", content: data.message });
+            localStorage.setItem('conversationHistory', JSON.stringify(conversationHistory));
+            updateChatMessages();
+
+            await generateWebsiteCode();
+
+        } catch (error) {
+            console.error('Error:', error);
+            conversationHistory.push({ role: "assistant", content: '오류가 발생했습니다. 다시 시도해 주세요.' });
+            updateChatMessages();
+        }
+    }
+
+    function updateChatMessages() {
+        const chatMessages = document.getElementById('chat-messages');
+        chatMessages.innerHTML = conversationHistory.map(msg => 
+            `<div class="message ${msg.role === 'user' ? 'user-message' : 'ai-message'}">
+                ${formatMessage(msg.content)}
+            </div>`
+        ).join('');
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function formatMessage(content) {
+        // 메시지 내용을 HTML로 포맷팅
+        return content.replace(/\n/g, '<br>')
+                      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                      .replace(/`(.*?)`/g, '<code>$1</code>');
+    }
+
+    async function generateWebsiteCode() {
+        const companyName = document.getElementById('company-name').value;
+        const industry = document.getElementById('industry').value;
+        const primaryColor = document.getElementById('primary-color').value;
+
+        try {
+            const response = await fetch(`${FIREBASE_FUNCTION_URL}/generateWebsite`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    sessionId: sessionId,
+                    companyName: companyName,
+                    industry: industry,
+                    primaryColor: primaryColor,
+                    conversationHistory: conversationHistory
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error('웹사이트 코드 생성 실패');
+            }
+
+            const data = await response.json();
+            const generatedCode = data.websiteCode;
+            
+            document.getElementById('generated-code').textContent = generatedCode;
+        
+            const previewFrame = document.getElementById('website-preview');
+            previewFrame.srcdoc = generatedCode;
+
+        } catch (error) {
+            const errorMessage = error.response ? error.response.data.details : error.message;
+            document.getElementById('generated-code').textContent = `웹사이트 코드를 생성할 수 없습니다. 오류 내용: ${errorMessage}`;
+            document.getElementById('website-preview').srcdoc = `<html><body><h1>오류 발생</h1><p>${error.message}</p></body></html>`;
+        }
+    }
+
+    // 페이지 로드 시 대화 내용 복원
+    updateChatMessages();
+    </script>
+</body>
+</html>
